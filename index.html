@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Health Shadow 🧠</title>
+<script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: #0f1115;
+    color: #eaeaea;
+  }
+  #root { max-width: 480px; margin: 0 auto; min-height: 100vh; padding-bottom: 80px; }
+
+  .header {
+    padding: 24px 20px 16px;
+    text-align: center;
+  }
+  .header h1 { margin: 0; font-size: 22px; }
+  .header p { color: #9aa0a6; font-size: 13px; margin-top: 4px; }
+
+  .card {
+    background: #1a1d24;
+    border-radius: 16px;
+    padding: 18px;
+    margin: 12px 20px;
+    border: 1px solid #2a2e37;
+  }
+
+  .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .stat { background: #1a1d24; border-radius: 12px; padding: 14px; border: 1px solid #2a2e37; }
+  .stat .label { font-size: 12px; color: #9aa0a6; }
+  .stat .value { font-size: 20px; font-weight: 600; margin-top: 4px; }
+
+  input, select, button {
+    width: 100%;
+    padding: 12px;
+    margin-top: 6px;
+    border-radius: 10px;
+    border: 1px solid #2a2e37;
+    background: #12141a;
+    color: #eaeaea;
+    font-size: 14px;
+  }
+  label { font-size: 13px; color: #9aa0a6; display: block; margin-top: 14px; }
+
+  button.primary {
+    background: #6c5ce7;
+    border: none;
+    font-weight: 600;
+    margin-top: 20px;
+    cursor: pointer;
+  }
+  button.primary:active { opacity: 0.8; }
+
+  .pattern-card {
+    background: linear-gradient(135deg, #2b2140, #1a1d24);
+    border: 1px solid #6c5ce7;
+  }
+  .pattern-flow { text-align: center; font-size: 14px; line-height: 2; margin: 10px 0; }
+  .confidence { font-size: 12px; color: #a29bfe; margin-top: 6px; }
+
+  .timeline-day {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 0; border-bottom: 1px solid #2a2e37; font-size: 13px;
+  }
+  .timeline-day:last-child { border-bottom: none; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+  .dot.red { background: #ff6b6b; }
+  .dot.green { background: #51cf66; }
+
+  .nav {
+    position: fixed; bottom: 0; left: 0; right: 0;
+    background: #12141a; border-top: 1px solid #2a2e37;
+    display: flex; max-width: 480px; margin: 0 auto;
+  }
+  .nav button {
+    flex: 1; background: none; border: none; color: #9aa0a6;
+    padding: 14px 0; font-size: 20px; margin: 0; border-radius: 0;
+  }
+  .nav button.active { color: #6c5ce7; }
+
+  .insight-box {
+    background: #12141a; border-radius: 12px; padding: 14px;
+    font-size: 14px; line-height: 1.6; margin-top: 10px;
+  }
+  .disclaimer {
+    font-size: 11px; color: #6b7280; margin-top: 14px; font-style: italic;
+  }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel">
+const { useState, useEffect } = React;
+
+// ---------- helpers ----------
+const emptyLog = () => ({
+  sleep: 6, classes: 6, lunchHour: 13, exercise: 0, water: 1.5, energy: "Normal"
+});
+
+function loadLogs() {
+  const raw = localStorage.getItem("hs_logs");
+  return raw ? JSON.parse(raw) : [];
+}
+function saveLogs(logs) {
+  localStorage.setItem("hs_logs", JSON.stringify(logs));
+}
+
+// Demo seed data matching the pitch story — use this for a guaranteed "wow" during judging
+const DEMO_DATA = [
+  { day: "Mon", sleep: 6, classes: 8, lunchHour: 14.5, exercise: 0, water: 1.2, energy: "Low" },
+  { day: "Tue", sleep: 6, classes: 7, lunchHour: 14.25, exercise: 10, water: 1.4, energy: "Low" },
+  { day: "Wed", sleep: 7, classes: 5, lunchHour: 13.0, exercise: 30, water: 2.0, energy: "Good" },
+  { day: "Thu", sleep: 5.5, classes: 8, lunchHour: 14.75, exercise: 0, water: 1.1, energy: "Low" },
+  { day: "Fri", sleep: 6, classes: 8, lunchHour: 14.5, exercise: 0, water: 1.3, energy: "Low" },
+];
+
+// ---------- the "AI" pattern engine ----------
+// Rule-based, but
+function analyzePatterns(logs) {
+  if (logs.length < 3) return { patterns: [], insight: null };
+
+  const longDay = l => l.classes >= 7;
+  const lateLunch = l => l.lunchHour >= 14;
+  const lowEnergy = l => l.energy === "Low";
+  const noExercise = l => l.exercise === 0;
+
+  const qualifying = logs.filter(l => longDay(l) && lateLunch(l));
+  const matching = qualifying.filter(l => lowEnergy(l) || noExercise(l));
+
+  const patterns = [];
+  if (qualifying.length >= 2) {
+    const confidence = Math.round((matching.length / qualifying.length) * 100);
+    if (confidence >= 50) {
+      patterns.push({
+        title: "Long classes + late lunch → low energy",
+        detail: `On ${matching.length} of your last ${qualifying.length} similar days, long college hours and a delayed lunch coincided with low energy or no movement.`,
+        confidence
+      });
+    }
+  }
+
+  // Secondary pattern: short sleep -> low energy
+  const shortSleep = logs.filter(l => l.sleep < 6.5);
+  const shortSleepLowEnergy = shortSleep.filter(lowEnergy);
+  if (shortSleep.length >= 2) {
+    const confidence = Math.round((shortSleepLowEnergy.length / shortSleep.length) * 100);
+    if (confidence >= 50) {
+      patterns.push({
+        title: "Short sleep → low energy",
+        detail: `${shortSleepLowEnergy.length} of ${shortSleep.length} nights with under 6.5 hrs sleep were followed by a low-energy day.`,
+        confidence
+      });
+    }
+  }
+
+  let insight = null;
+  if (patterns.length > 0) {
+    insight = {
+      chain: ["Long classes", "Late lunch", "Low energy", "Less movement"],
+      suggestion:
+        "Your 30-minute workout isn't failing because of motivation — on your long-class days you simply don't have a free 30-minute window. Try a 10-minute walk between afternoon sessions instead of planning a separate workout block."
+    };
+  }
+
+  return { patterns, insight };
+}
+
+// ---------- components ----------
+function Header() {
+  return (
+    <div className="header">
+        <h1>🧠 Health Shadow</h1>
+      <p>Not what happened. What repeatedly happens.</p>
+    </div>
+  );
+}
+
+function Dashboard({ logs }) {
+  const avg = key => logs.length ? (logs.reduce((s, l) => s + Number(l[key]), 0) / logs.length).toFixed(1) : "–";
+  const { patterns } = analyzePatterns(logs);
+  return (
+    <>
+      <div className="stat-grid" style={{ margin: "12px 20px" }}>
+        <div className="stat"><div className="label">😴 Avg Sleep</div><div className="value">{avg("sleep")} hrs</div></div>
+        <div className="stat"><div className="label">💧 Avg Water</div><div className="value">{avg("water")} L</div></div>
+        <div className="stat"><div className="label">🚶 Avg Movement</div><div className="value">{avg("exercise")} min</div></div>
+        <div className="stat"><div className="label">📅 Days Logged</div><div className="value">{logs.length}</div></div>
+      </div>
+      <div className="card">
+        <strong>🔎 {patterns.length} pattern{patterns.length !== 1 ? "s" : ""} detected</strong>
+        <p style={{ fontSize: 13, color: "#9aa0a6", marginTop: 6 }}>
+          {patterns.length ? "Check the Patterns tab for details." : "Log a few more days to surface patterns."}
+        </p>
+      </div>
+    </>
+  );
+}
+
+function LogForm({ logs, setLogs }) {
+  const [form, setForm] = useState(emptyLog());
+  const update = (k, v) => setForm({ ...form, [k]: v });
+
+  const submit = () => {
+    const dayLabel = "Day " + (logs.length + 1);
+    const newLogs = [...logs, { day: dayLabel, ...form, lunchHour: Number(form.lunchHour) }];
+    setLogs(newLogs);
+    saveLogs(newLogs);
+    setForm(emptyLog());
+    alert("Day saved!");
+  };
+
+  const loadDemo = () => {
+    setLogs(DEMO_DATA);
+    saveLogs(DEMO_DATA);
+    alert("Demo week loaded!");
+  };
+
+  return (
+    <div className="card">
+      <strong>Today's Log</strong>
+
+      <label>Sleep (hrs)</label>
+      <input type="number" step="0.5" value={form.sleep} onChange={e => update("sleep", Number(e.target.value))} />
+
+      <label>Class hours</label>
+      <input type="number" step="0.5" value={form.classes} onChange={e => update("classes", Number(e.target.value))} />
+
+      <label>Lunch time (24hr, e.g. 14.5 = 2:30PM)</label>
+      <input type="number" step="0.25" value={form.lunchHour} onChange={e => update("lunchHour", Number(e.target.value))} />
+
+      <label>Exercise (min)</label>
+      <input type="number" value={form.exercise} onChange={e => update("exercise", Number(e.target.value))} />
+
+      <label>Water (L)</label>
+      <input type="number" step="0.1" value={form.water} onChange={e => update("water", Number(e.target.value))} />
+
+      <label>Energy</label>
+      <select value={form.energy} onChange={e => update("energy", e.target.value)}>
+        <option>Low</option>
+        <option>Normal</option>
+        <option>Good</option>
+      </select>
+
+      <button className="primary" onClick={submit}>Save Day</button>
+      <button style={{ marginTop: 10, background: "#2a2e37" }} onClick={loadDemo}>⚡ Load Demo Week</button>
+    </div>
+  );
+}
+
+function Patterns({ logs }) {
+  const { patterns } = analyzePatterns(logs);
+  if (!patterns.length) {
+    return <div className="card">Not enough data yet. Log at least 3 days, or tap "Load Demo Week" on the Log tab.</div>;
+  }
+  return (
+    <>
+      {patterns.map((p, i) => (
+        <div className="card pattern-card" key={i}>
+          <strong>🔎 PATTERN DETECTED</strong>
+          <div className="pattern-flow">{p.title}</div>
+          <div style={{ fontSize: 13, color: "#c9c9d9" }}>{p.detail}</div>
+          <div className="confidence">Confidence: {p.confidence}% of similar days</div>
+        </div>
+      ))}
+      <div className="disclaimer" style={{ margin: "0 20px" }}>
+        This reflects patterns observed in your logged data — not a medical diagnosis or proof of causation.
+      </div>
+    </>
+  );
+}
+
+function Timeline({ logs }) {
+  if (!logs.length) return <div className="card">No days logged yet.</div>;
+  return (
+    <div className="card">
+      {logs.map((l, i) => {
+        const flagged = l.energy === "Low" || l.exercise === 0;
+        return (
+          <div className="timeline-day" key={i}>
+            <div className={"dot " + (flagged ? "red" : "green")}></div>
+            <div>
+              <strong>{l.day}</strong> — {flagged
+                ? `${l.classes >= 7 ? "Long classes, " : ""}${l.lunchHour >= 14 ? "late lunch, " : ""}${l.energy.toLowerCase()} energy`
+                : "Normal day"}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function Insight({ logs }) {
+  const { insight } = analyzePatterns(logs);
+  if (!insight) return <div className="card">No insight yet — log more days or load the demo week.</div>;
+  return (
+    <div className="card pattern-card">
+      <strong>💡 YOUR SHADOW</strong>
+      <div className="pattern-flow">
+        {insight.chain.join(" → ")}
+      </div>
+      <div className="insight-box">{insight.suggestion}</div>
+    </div>
+  );
+}
+
+function App() {
+  const [logs, setLogs] = useState(loadLogs());
+  const [tab, setTab] = useState("dashboard");
+
+  const tabs = {
+    dashboard: <Dashboard logs={logs} />,
+    log: <LogForm logs={logs} setLogs={setLogs} />,
+    patterns: <Patterns logs={logs} />,
+    timeline: <Timeline logs={logs} />,
+    insight: <Insight logs={logs} />,
+  };
+
+  return (
+    <>
+      <Header />
+      {tabs[tab]}
+      <div className="nav">
+        <button className={tab === "dashboard" ? "active" : ""} onClick={() => setTab("dashboard")}>🏠</button>
+        <button className={tab === "log" ? "active" : ""} onClick={() => setTab("log")}>✏️</button>
+        <button className={tab === "patterns" ? "active" : ""} onClick={() => setTab("patterns")}>🔎</button>
+        <button className={tab === "timeline" ? "active" : ""} onClick={() => setTab("timeline")}>📅</button>
+        <button className={tab === "insight" ? "active" : ""} onClick={() => setTab("insight")}>💡</button>
+      </div>
+    </>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
